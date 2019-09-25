@@ -1,0 +1,45 @@
+samples:
+- inpuths
+- inputpt
+- TRIM28hs
+- TRIM28pt
+
+reads:
+- R1
+- R2
+- R3
+
+reads2:
+- R1
+- R3
+
+lanes:
+- L001
+- L002
+- L003
+- L004
+
+sampleFiles:
+- inpuths/Input_hiPS6_S3
+- inputpt/Input_ciPS_Sandra_S4
+- TRIM28hs/TRIM28_hiPS6_S1
+- TRIM28pt/TRIM28_ciPS_Sandra_S2
+
+sampleNamesID:
+- Input_hiPS6_S3
+- Input_ciPS_Sandra_S4
+- TRIM28_hiPS6_S1
+- TRIM28_ciPS_Sandra_S2
+
+sampleIDs:
+- S3
+- S4
+- S1
+- S2
+
+
+sampleNames:
+- Input_hiPS6
+- Input_ciPS_Sandra
+- TRIM28_hiPS6
+- TRIM28_ciPS_Sandra

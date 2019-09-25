@@ -1,0 +1,50 @@
+{
+    "__default__" :
+    {
+        "account" : "lsens2018-3-3",
+        "time" : "02:15:00",
+        "N" : 1,
+        "n" : 8,
+        "partition" : "dell",
+        "memory" : 3200,
+        "o" : "%j.out",
+        "e" : "%j.err",
+        "J" : "%j"
+    },
+    "run_catlanes_R1" :
+    {
+        "account" : "lsens2018-3-3",
+        "time" : "02:00:00",
+        "N" : 1,
+        "n" : 4,
+        "partition" : "dell",
+        "memory" : 3200,
+        "o" : "%j.catlanesR1.out",
+        "e" : "%j.catlanesR1.err",
+        "J" : "%j.catlanesR1"
+    },
+    "run_catlanes_R3" :
+    {
+        "account" : "lsens2018-3-3",
+        "time" : "02:00:00",
+        "N" : 1,
+        "n" : 4,
+        "partition" : "dell",
+        "memory" : 3200,
+        "o" : "%j.catlanesR3.out",
+        "e" : "%j.catlanesR3.err",
+        "J" : "%j.catlanesR3"
+    },
+    "map_hg38" :
+    {
+        "account" : "lsens2018-3-3",
+        "time" : "04:00:00",
+        "N" : 1,
+        "n" : 10,
+        "partition" : "dell",
+        "memory" : 3200,
+        "o" : "%j.bt2.out",
+        "e" : "%j.bt2.err",
+        "J" : "%j.bt2"
+    },
+}

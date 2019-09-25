@@ -1,0 +1,517 @@
+configfile: "config.yaml"
+
+# snakemake -j 8 --cluster-config lunarc_config.json --cluster "sbatch -A {cluster.account} --mem-per-cpu {cluster.memory} -p {cluster.partition} -n {cluster.n} -t {cluster.time} -o {cluster.o} -e {cluster.e} -J {cluster.J} -N {cluster.N}"  --latency-wait 100
+
+ngs_raw="/projects/fs1/medpvb/backup/projects/ChimpHuman/ChIPseq/Seq017chip/181016_NB502004_0033_AH57VVAFXY"
+basecalls=ngs_raw + "/Data/Intensities/BaseCalls"
+projectName="/TRIM28chip_HumanChimp"
+
+fastqDir="/projects/fs1/medpvb/backup/projects/ChimpHuman/RNAseq/fastq"
+projectDir="/projects/fs1/medpvb/backup/projects/ChimpHuman/RNAseq/pantro6_pipeline"
+
+rule all:
+    input:
+        #basecalls + "/fastq.readcounts.all.txt",
+        expand(basecalls + projectName + "/{sampleFile}_{lane}_{read}_001_fastqc.zip",sampleFile=config['sampleFiles'],lane=config['lanes'],read=config['reads']),
+        #ngs_raw + "/multiqc_report.html",
+        #expand(basecalls + "/Undetermined_S0_{lane}_{read}_001_fastqc.zip",lane=config['lanes'],read=config['reads']),
+        expand("../2_fastq.trimmed/{sampleFile}.R3.trimmomatic_fastqc.zip",sampleFile=config['sampleFiles']),
+        expand("../2_fastq.trimmed/{sampleFile}.R1.trimmomatic_fastqc.zip",sampleFile=config['sampleFiles']),
+        expand("../1_fastq/{sampleFile}.R1_fastqc.zip",sampleFile=config['sampleFiles']),
+        expand("../1_fastq/{sampleFile}.R3_fastqc.zip",sampleFile=config['sampleFiles']),
+        "../1_fastq/multiqc_report.html",
+        "../2_fastq.trimmed/multiqc_report.html",
+        expand("../3_bt2/{sampleFile}.bt2.sens-loc.bam",sampleFile=config['sampleFiles']),
+        expand("../3_bt2/{sampleFile}.bt2.sens-loc.MAPQ10.bam",sampleFile=config['sampleFiles']),
+        "../3_bt2/ucsc.tracks.unique.all.txt",
+        "../3_bt2/multiqc_report.html"
+
+rule run_bcl2fastq:
+    input:
+        ngs_raw + "/RunInfo.xml"
+    output:
+        basecalls + "/Undetermined_S0_L001_R1_001.fastq.gz"
+    shell:
+        """
+
+        # THIS SCRIPT IS RUN WITH A RunInfo.xml THAT SET R3 (INDEX2) IsIndexedRead = N! THIS WILL IGNORE SECOND INDEX IN DEMULTIPLEXING
+        # load modules
+        ml  GCCcore/6.3.0  bcl2fastq/2.19.1
+        # run bcl2fastq
+        bcl2fastq --barcode-mismatches 2
+      """
+
+### Counting reads in fastqc files
+rule count_fastqReads_undet:
+    input:
+        undet=basecalls + "/Undetermined_S0_{lane}_{read}_001.fastq.gz"
+    output:
+        undet=basecalls + "/Undetermined_S0_{lane}_{read}_001.readCounts.txt"
+    shell:
+        """
+
+        echo $(zcat {input.undet}|wc -l)/4|bc > {output.undet}
+
+        """
+
+rule count_fastqReads_samples:
+    input:
+        basecalls + projectName + "/{sampleFile}_{lane}_{read}_001.fastq.gz"
+    output:
+        basecalls + projectName + "/{sampleFile}_{lane}_{read}_001.readCounts.txt"
+    shell:
+        """
+
+        echo $(zcat {input}|wc -l)/4|bc > {output}
+
+        """
+
+rule make_fastqReadCount_file:
+    input:
+        undet=expand(basecalls + "/Undetermined_S0_{lane}_{read}_001.readCounts.txt",lane=config['lanes'],read=config['reads']),
+        samples=expand(basecalls + projectName + "/{sampleFile}_{lane}_{read}_001.readCounts.txt",sampleFile=config['sampleFiles'],lane=config['lanes'],read=config['reads'])
+    output:
+        basecalls + "/fastq.readcounts.all.txt"
+    params:
+        bc=basecalls + projectName + "/",
+        und=basecalls + "/"
+    shell:
+        """
+        echo "SAMPLES demux: " >> {output}
+
+        for file in {input.samples}
+        do echo $file | sed 's+{params.bc}++g' >> {output}
+        cat $file >> {output}
+        echo " " >> {output}
+        done
+
+        echo " " >> {output}
+        echo " " >> {output}
+        echo " " >> {output}
+
+        echo "UNDETERMINED: " >> {output}
+        for file in {input.undet}
+        do echo $file | sed 's+{params.und}++g' >> {output}
+        cat $file >> {output}
+        echo " " >> {output}
+        done
+
+
+        """
+
+rule run_fastqc:
+    input:
+        basecalls + projectName + "/{sampleFile}_{lane}_{read}_001.fastq.gz"
+    output:
+        basecalls + projectName + "/{sampleFile}_{lane}_{read}_001_fastqc.html",
+        basecalls + projectName + "/{sampleFile}_{lane}_{read}_001_fastqc.zip"
+    shell:
+        """
+        ml fastqc
+        fastqc {input}
+        """
+
+rule run_fastqc_undetermined:
+    input:
+        undet=basecalls + "/Undetermined_S0_{lane}_{read}_001.fastq.gz"
+    output:
+        basecalls + "/Undetermined_S0_{lane}_{read}_001_fastqc.html",
+        basecalls + "/Undetermined_S0_{lane}_{read}_001_fastqc.zip"
+    shell:
+        """
+        ml fastqc
+        fastqc {input}
+        """
+
+rule run_multiqc:
+    input:
+        expand(basecalls + projectName + "/{sampleFile}_{lane}_{read}_001_fastqc.zip",sampleFile=config['sampleFiles'],lane=config['lanes'],read=config['reads']),
+        expand(basecalls + "/Undetermined_S0_{lane}_{read}_001_fastqc.zip",lane=config['lanes'],read=config['reads'])
+    output:
+        ngs_raw + "/multiqc_report.html"
+    params:
+        direct=ngs_raw
+    shell:
+        """
+        ml   icc/2017.4.196-GCC-6.4.0-2.28  impi/2017.3.196
+        ml MultiQC/1.2-Python-2.7.14
+
+        cd {params.direct}
+        multiqc -f --outdir {params.direct} {params.direct}
+
+        """
+
+rule run_catlanes_R1:
+    input:
+        L1=basecalls + projectName + "/{sampleFile}_L001_R1_001.fastq.gz",
+        L2=basecalls + projectName + "/{sampleFile}_L002_R1_001.fastq.gz",
+        L3=basecalls + projectName + "/{sampleFile}_L003_R1_001.fastq.gz",
+        L4=basecalls + projectName + "/{sampleFile}_L004_R1_001.fastq.gz",
+    output:
+        out=basecalls + projectName + "/{sampleFile}_R1.fastq",
+        done=basecalls + projectName + "/{sampleFile}_R1.fastq.done.txt",
+        count=basecalls + projectName + "/{sampleFile}_R3.fastq.readCounts.txt",
+    shell:
+        """
+        zcat {input} > {output.out}
+        echo $(zcat {output.out}|wc -l)/4|bc > {output.count}
+        touch {output.done}
+    """
+rule run_catlanes_R3:
+    input:
+        L1=basecalls + projectName + "/{sampleFile}_L001_R3_001.fastq.gz",
+        L2=basecalls + projectName + "/{sampleFile}_L002_R3_001.fastq.gz",
+        L3=basecalls + projectName + "/{sampleFile}_L003_R3_001.fastq.gz",
+        L4=basecalls + projectName + "/{sampleFile}_L004_R3_001.fastq.gz",
+    output:
+        out=basecalls + projectName + "/{sampleFile}_R3.fastq",
+        count=basecalls + projectName + "/{sampleFile}_R3.fastq.readCounts.txt",
+        done=basecalls + projectName + "/{sampleFile}_R3.fastq.done.txt"
+    shell:
+        """
+        zcat {input} > {output.out}
+        echo $(zcat {output.out}|wc -l)/4|bc > {output.count}
+        touch {output.done}
+        """
+
+rule move_fastq:
+    input:
+        r1=basecalls + projectName + "/{sampleFile}_R1.fastq",
+        r2=basecalls + projectName + "/{sampleFile}_R3.fastq"
+    output:
+        r1="../1_fastq/{sampleFile}.R1.fastq.gz",
+        r2="../1_fastq/{sampleFile}.R3.fastq.gz",
+        done="../1_fastq/{sampleFile}.R3.R1.fastq.gz.done.txt",
+    params:
+        r1="../1_fastq/{sampleFile}.R1.fastq",
+        r2="../1_fastq/{sampleFile}.R3.fastq",
+    shell:
+        """
+        mv {input.r1} {params.r1}
+        mv {input.r2} {params.r2}
+
+        gzip {params.r1}
+        gzip {params.r2}
+
+        touch {output.done}
+
+        """
+
+rule fastqc_cattedFastq:
+    input:
+        r1="../1_fastq/{sampleFile}.R1.fastq.gz",
+        r2="../1_fastq/{sampleFile}.R3.fastq.gz",
+    output:
+        r1="../1_fastq/{sampleFile}.R1_fastqc.zip",
+        r2="../1_fastq/{sampleFile}.R3_fastqc.zip",
+        done="../1_fastq/{sampleFile}.R3_fastqc.zip.done.txt",
+    shell:
+        """
+        ml fastqc
+        fastqc {input}
+
+        touch {output.done}
+        """
+
+rule trimmomatic_r1_r2:
+    input:
+        r1="../1_fastq/{sampleFile}.R1.fastq.gz",
+        r2="../1_fastq/{sampleFile}.R3.fastq.gz",
+    output:
+        r1="../2_fastq.trimmed/{sampleFile}.R1.trimmomatic.fq.gz",
+        r1u="../2_fastq.trimmed/{sampleFile}.R1.trimmomatic.unpaired.fq.gz",
+        r2="../2_fastq.trimmed/{sampleFile}.R3.trimmomatic.fq.gz",
+        r2u="../2_fastq.trimmed/{sampleFile}.R3.trimmomatic.unpaired.fq.gz",
+        done="../2_fastq.trimmed/{sampleFile}.R3.trimmomatic.unpaired_done.txt",
+    threads: 8
+    params:
+        leading=20,
+        trailing=20,
+        slidingw_wind=4,
+        slidingw_q=20,
+        minlen=50,
+        fa="TruSeq3-PE.fa"
+    shell:
+        """
+
+        module load Trimmomatic/0.32-Java-1.8.0_92
+
+        java -jar $EBROOTTRIMMOMATIC/trimmomatic-0.32.jar PE -threads 8 -phred33 -trimlog \
+        ../2_fastq.trimmed/{wildcards.sampleFile}.trim.log {input} {output.r1} {output.r1u} \
+        {output.r2} {output.r2u} ILLUMINACLIP:{params.fa}:2:30:10 \
+        LEADING:{params.leading} TRAILING:{params.trailing} \
+        SLIDINGWINDOW:{params.slidingw_wind}:{params.slidingw_q} MINLEN:{params.minlen}
+
+        touch {output.done}
+        """
+
+rule fastqc_trimmed:
+    input:
+        r1="../2_fastq.trimmed/{sampleFile}.R1.trimmomatic.fq.gz",
+        r2="../2_fastq.trimmed/{sampleFile}.R3.trimmomatic.fq.gz",
+        done="../2_fastq.trimmed/{sampleFile}.R3.trimmomatic.unpaired_done.txt",
+    output:
+        r1="../2_fastq.trimmed/{sampleFile}.R1.trimmomatic_fastqc.zip",
+        r2="../2_fastq.trimmed/{sampleFile}.R3.trimmomatic_fastqc.zip",
+        done="../2_fastq.trimmed/{sampleFile}.R3.trimmomatic_fastqc.zip.done.txt",
+    shell:
+        """
+        ml fastqc
+        fastqc {input}
+
+        touch {output.done}
+        """
+
+rule multiqc_1fastq:
+    input:
+        r1=expand("../1_fastq/{sampleFile}.R1_fastqc.zip",sampleFile=config['sampleFiles']),
+        r2=expand("../1_fastq/{sampleFile}.R3_fastqc.zip",sampleFile=config['sampleFiles'])
+    output:
+        "../1_fastq/multiqc_report.html"
+    params:
+        direct="../1_fastq"
+    shell:
+        """
+        ml   icc/2017.4.196-GCC-6.4.0-2.28  impi/2017.3.196
+        ml MultiQC/1.2-Python-2.7.14
+
+        cd {params.direct}
+        multiqc -f --outdir {params.direct} {params.direct}
+    """
+
+rule multiqc_2fastq:
+    input:
+        r1=expand("../2_fastq.trimmed/{sampleFile}.R1.trimmomatic.fq.gz",sampleFile=config['sampleFiles']),
+        r2=expand("../2_fastq.trimmed/{sampleFile}.R3.trimmomatic.fq.gz",sampleFile=config['sampleFiles'])
+    output:
+        "../2_fastq.trimmed/multiqc_report.html"
+    params:
+        direct="../2_fastq.trimmed"
+    shell:
+        """
+        ml   icc/2017.4.196-GCC-6.4.0-2.28  impi/2017.3.196
+        ml MultiQC/1.2-Python-2.7.14
+
+        cd {params.direct}
+        multiqc -f --outdir {params.direct} {params.direct}
+    """
+
+rule map_hg38:
+    input:
+        r1="../2_fastq.trimmed/{sampleFile}.R1.trimmomatic.fq.gz",
+        r2="../2_fastq.trimmed/{sampleFile}.R3.trimmomatic.fq.gz",
+    output:
+        "../3_bt2/{sampleFile}.bt2.sens-loc.sam",
+    shell:
+        """
+
+        ml GCC/5.4.0-2.26  OpenMPI/1.10.3
+        ml Bowtie2/2.3.2
+
+        bowtie2 --sensitive-local -p 10 -x /projects/fs1/common/genome/lunarc/indicies/bowtie2/human/hg38/hg38 -1 {input.r1} -2 {input.r2} -S {output}
+
+
+        """
+
+rule multiqc_sam:
+    input:
+        expand("../3_bt2/{sampleFile}.bt2.sens-loc.sam",sampleFile=config['sampleFiles'])
+    output:
+        "../3_bt2/multiqc_report.html"
+    params:
+        dir="../3_bt2"
+    shell:
+        """
+
+        ml   icc/2017.4.196-GCC-6.4.0-2.28  impi/2017.3.196
+        ml MultiQC/1.2-Python-2.7.14
+
+        cd {params.dir}
+        multiqc -f --outdir {params.dir} {params.dir}
+        """
+
+
+
+rule sam_filtering:
+    input:
+        "../3_bt2/{sampleFile}.bt2.sens-loc.sam",
+    output:
+        sam="../3_bt2/{sampleFile}.bt2.sens-loc.MAPQ10.sam",
+        statsU="../3_bt2/{sampleFile}.bt2.sens-loc.MAPQ10.stats",
+        statsM="../3_bt2/{sampleFile}.bt2.sens-loc.orig.stats"
+    shell:"""
+
+        ml GCC/5.4.0-2.26  OpenMPI/1.10.3
+        ml SAMtools/1.4
+
+        echo "> Filter MAPQ >10 to get unique reads:"
+        echo ">> samtools view -q 10 -h {input} > {output.sam}"
+        samtools view -q 10 -h {input} > {output.sam}
+
+        echo "> Stats unique reads:"
+        echo ">> samtools stats {output.sam} > {output.statsU}"
+        samtools stats {output.sam} > {output.statsU}
+
+        echo "> Stats all mapped reads:"
+        echo ">> samtools stats {input} > {output.statsM}"
+        samtools stats {input} > {output.statsM}
+
+        """
+
+
+rule samToBam:
+    input:
+        samU="../3_bt2/{sampleFile}.bt2.sens-loc.MAPQ10.sam",
+        samOrig="../3_bt2/{sampleFile}.bt2.sens-loc.sam"
+    output:
+        bamU="../3_bt2/{sampleFile}.bt2.sens-loc.MAPQ10.bam",
+        bamM="../3_bt2/{sampleFile}.bt2.sens-loc.bam"
+    shell: """
+        ml GCC/5.4.0-2.26  OpenMPI/1.10.3
+        ml SAMtools/1.4
+
+        echo "> Convert to bam"
+        echo "> samtools view -Sb {input.samOrig} > {output.bamM}"
+        samtools view -Sb {input.samOrig} > {output.bamM}
+        echo "> samtools view -Sb {input.samU} > {output.bamU}"
+        samtools view -Sb {input.samU} > {output.bamU}
+    """
+
+rule BamToBw:
+    input:
+        "../3_bt2/{sampleFile}.bt2.sens-loc.MAPQ10.bam",
+    output:
+        bw="../3_bt2/{sampleFile}.bt2.sens-loc.MAPQ10.bw",
+        sortedBam="../3_bt2/{sampleFile}.bt2.sens-loc.MAPQ10.sorted.bam"
+    shell:"""
+
+        ml GCC/5.4.0-2.26  OpenMPI/1.10.3
+        ml SAMtools/1.4
+        ml foss/2016b
+        ml Python/3.5.2
+
+        samtools sort -o {output.sortedBam} {input}
+        samtools index -b {output.sortedBam}
+        bamCoverage -b {output.sortedBam} -o {output.bw}
+
+    """
+
+rule ucsc_samplewise:
+    input:
+        bw="../3_bt2/{sampleFile}.bt2.sens-loc.MAPQ10.bw",
+    output:
+        "../3_bt2/{sampleFile}.ucsc.tracks.unique.txt"
+    shell:"""
+    #    ml ncftp
+    #    ncftpput -u med-pvb -p [PASSWORD] bone.bmc.lu.se Public {input}
+        basename=$(basename {input})
+        echo "track type=bigWig name={wildcards.sampleFile}_unique visibility=full smoothingWindow=4 autoScale=on description={wildcards.sampleFile}_unique bigDataUrl=http://bone.bmc.lu.se/Public/$basename color=0,0,255" > {output}
+    """
+
+rule ucsc_all:
+    input:
+        expand("../3_bt2/{sampleFile}.ucsc.tracks.unique.txt",sampleFile=config["sampleFiles"])
+    output:
+        "../3_bt2/ucsc.tracks.unique.all.txt"
+    shell:
+        """
+        cat {input} > {output}
+
+        rm {input}
+        """
+
+
+#
+# rule sam_filtering:
+#     input:
+#         r1="../2_fastq.trimmed/{sampleFile}.R1.bt2.sens-loc.sam",
+#         r2="../2_fastq.trimmed/{sampleFile}.R3.bt2.sens-loc.sam",
+#     output:
+#         r1="../2_fastq.trimmed/{sampleFile}.R1.bt2.sens-loc.MAPQ10.sam",
+#         r2="../2_fastq.trimmed/{sampleFile}.R3.bt2.sens-loc.MAPQ10.sam",
+#         r2="../2_fastq.trimmed/{sampleFile}.R3.bt2.sens-loc.MAPQ10.sam",
+#         statsU="../2_bowtie2/filtered/{sample}.bt2.sens-loc.MAPQ10.stats",
+#         statsM="../2_bowtie2/{sample}.bt2.sens-loc.orig.stats"
+#     shell:"""
+#
+#         ml GCC/5.4.0-2.26  OpenMPI/1.10.3
+#         ml SAMtools/1.4
+#
+#         echo "> Filter MAPQ >10 to get unique reads:"
+#         echo ">> samtools view -q 10 -h {input} > {output.sam}"
+#         samtools view -q 10 -h {input} > {output.sam}
+#
+#         echo "> Stats unique reads:"
+#         echo ">> samtools stats {output.sam} > {output.statsU}"
+#         samtools stats {output.sam} > {output.statsU}
+#
+#         echo "> Stats all mapped reads:"
+#         echo ">> samtools stats {input} > {output.statsM}"
+#         samtools stats {input} > {output.statsM}
+#
+#         """
+#
+# rule samToBam:
+#     input:
+#         samU="../2_bowtie2/filtered/{sample}.bt2.sens-loc.MAPQ10.sam",
+#         samOrig="../2_bowtie2/{sample}.R1.bt2.sens-loc.sam"
+#     output:
+#         bamM="../2_bowtie2/{sample}.bt2.sens-loc.orig.bam",
+#         bamU="../2_bowtie2/filtered/{sample}.bt2.sens-loc.MAPQ10.bam"
+#     shell: """
+#         ml GCC/5.4.0-2.26  OpenMPI/1.10.3
+#         ml SAMtools/1.4
+#
+#         echo "> Convert to bam"
+#         echo "> samtools view -Sb {input.samOrig} > {output.bamM}"
+#         samtools view -Sb {input.samOrig} > {output.bamM}
+#         echo "> samtools view -Sb {input.samU} > {output.bamU}"
+#         samtools view -Sb {input.samU} > {output.bamU}
+#     """
+#
+# rule BamToBw:
+#     input:
+#         "../2_bowtie2/filtered/{sample}.bt2.sens-loc.MAPQ10.bam"
+#     output:
+#         bw="../2_bowtie2/filtered/{sample}.bt2.sens-loc.MAPQ10.bw",
+#         sortedBam="../2_bowtie2/filtered/{sample}.bt2.sens-loc.MAPQ10.sorted.bam"
+#     shell:"""
+#
+#         ml GCC/5.4.0-2.26  OpenMPI/1.10.3
+#         ml SAMtools/1.4
+#         ml foss/2016b
+#         ml Python/3.5.2
+#
+#         basename=$(basename {input} .bam)
+#         dirname=$(dirname {input})
+#
+#         samtools sort -o {output.sortedBam} {input}
+#         samtools index -b {output.sortedBam}
+#         bamCoverage -b {output.sortedBam} -o {output}
+#
+#     """
+#
+# rule ucsc_samplewise:
+#     input:
+#         "../2_bowtie2/filtered/{sample}.bt2.sens-loc.MAPQ10.bw"
+#     output:
+#         "../2_bowtie2/ucsc.tracks.unique.{sample}.txt"
+#     shell:"""
+#         ml ncftp
+#         ncftpput -u med-pvb -p 954Pofs6 bone.bmc.lu.se Public {input}
+#         basename=$(basename {input})
+#         echo "track type=bigWig name={wildcards.sample}_unique visibility=full smoothingWindow=4 autoScale=on description={wildcards.sam
+# ple}_unique bigDataUrl=http://bone.bmc.lu.se/Public/$basename color=0,0,255" > {output}
+#     """
+#
+# rule ucsc_all:
+#     input:
+#         expand("../2_bowtie2/ucsc.tracks.unique.{sample}.txt",sample=config["sample_ids"])
+#     output:
+#         "../2_bowtie2/ucsc.tracks.unique.all.txt"
+#     shell:
+#         """
+#         cat {input} > {output}
+#
+#         rm {input}
+#         """
